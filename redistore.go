@@ -15,9 +15,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/admpub/sessions"
 	"github.com/garyburd/redigo/redis"
 	"github.com/gorilla/securecookie"
-	"github.com/gorilla/sessions"
+	"github.com/webx-top/echo"
 )
 
 // Amount of time for cookies/redis keys to expire.
@@ -222,22 +223,22 @@ func (s *RediStore) Close() error {
 // Get returns a session for the given name after adding it to the registry.
 //
 // See gorilla/sessions FilesystemStore.Get().
-func (s *RediStore) Get(r *http.Request, name string) (*sessions.Session, error) {
-	return sessions.GetRegistry(r).Get(s, name)
+func (s *RediStore) Get(ctx echo.Context, name string) (*sessions.Session, error) {
+	return sessions.GetRegistry(ctx).Get(s, name)
 }
 
 // New returns a session for the given name without adding it to the registry.
 //
 // See gorilla/sessions FilesystemStore.New().
-func (s *RediStore) New(r *http.Request, name string) (*sessions.Session, error) {
+func (s *RediStore) New(ctx echo.Context, name string) (*sessions.Session, error) {
 	var err error
 	session := sessions.NewSession(s, name)
 	// make a copy
 	options := *s.Options
 	session.Options = &options
 	session.IsNew = true
-	if c, errCookie := r.Cookie(name); errCookie == nil {
-		err = securecookie.DecodeMulti(name, c.Value, &session.ID, s.Codecs...)
+	if v := ctx.Request().Cookie(name); v != `` {
+		err = securecookie.DecodeMulti(name, v, &session.ID, s.Codecs...)
 		if err == nil {
 			ok, err := s.load(session)
 			session.IsNew = !(err == nil && ok) // not new if no error and data available
@@ -247,13 +248,13 @@ func (s *RediStore) New(r *http.Request, name string) (*sessions.Session, error)
 }
 
 // Save adds a single session to the response.
-func (s *RediStore) Save(r *http.Request, w http.ResponseWriter, session *sessions.Session) error {
+func (s *RediStore) Save(ctx echo.Context, session *sessions.Session) error {
 	// Marked for deletion.
 	if session.Options.MaxAge < 0 {
 		if err := s.delete(session); err != nil {
 			return err
 		}
-		http.SetCookie(w, sessions.NewCookie(session.Name(), "", session.Options))
+		ctx.Response().SetCookie(sessions.NewCookie(session.Name(), "", session.Options))
 	} else {
 		// Build an alphanumeric key for the redis store.
 		if session.ID == "" {
@@ -266,7 +267,7 @@ func (s *RediStore) Save(r *http.Request, w http.ResponseWriter, session *sessio
 		if err != nil {
 			return err
 		}
-		http.SetCookie(w, sessions.NewCookie(session.Name(), encoded, session.Options))
+		ctx.Response().SetCookie(sessions.NewCookie(session.Name(), encoded, session.Options))
 	}
 	return nil
 }
@@ -275,7 +276,7 @@ func (s *RediStore) Save(r *http.Request, w http.ResponseWriter, session *sessio
 //
 // WARNING: This method should be considered deprecated since it is not exposed via the gorilla/sessions interface.
 // Set session.Options.MaxAge = -1 and call Save instead. - July 18th, 2013
-func (s *RediStore) Delete(r *http.Request, w http.ResponseWriter, session *sessions.Session) error {
+func (s *RediStore) Delete(ctx echo.Context, session *sessions.Session) error {
 	conn := s.Pool.Get()
 	defer conn.Close()
 	if _, err := conn.Do("DEL", s.keyPrefix+session.ID); err != nil {
@@ -284,7 +285,7 @@ func (s *RediStore) Delete(r *http.Request, w http.ResponseWriter, session *sess
 	// Set cookie to expire.
 	options := *session.Options
 	options.MaxAge = -1
-	http.SetCookie(w, sessions.NewCookie(session.Name(), "", &options))
+	ctx.Response().SetCookie(sessions.NewCookie(session.Name(), "", &options))
 	// Clear session values.
 	for k := range session.Values {
 		delete(session.Values, k)
