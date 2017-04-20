@@ -236,7 +236,7 @@ func (s *RediStore) New(ctx echo.Context, name string) (*sessions.Session, error
 	options := *s.Options
 	session.Options = &options
 	session.IsNew = true
-	if v := ctx.Request().Cookie(name); len(v) > 0 {
+	if v := ctx.GetCookie(name); len(v) > 0 {
 		err = securecookie.DecodeMulti(name, v, &session.ID, s.Codecs...)
 		if err == nil {
 			ok, err := s.load(session)
@@ -284,7 +284,7 @@ func (s *RediStore) Delete(ctx echo.Context, session *sessions.Session) error {
 	// Set cookie to expire.
 	options := *session.Options
 	options.MaxAge = -1
-	ctx.Response().SetCookie(sessions.NewCookie(session.Name(), "", &options))
+	sessions.SetCookie(ctx, session.Name(), "", &options)
 	// Clear session values.
 	for k := range session.Values {
 		delete(session.Values, k)
