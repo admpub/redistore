@@ -18,7 +18,6 @@ import (
 	"github.com/garyburd/redigo/redis"
 	"github.com/gorilla/securecookie"
 	"github.com/webx-top/echo"
-	"github.com/webx-top/echo/engine"
 )
 
 // Amount of time for cookies/redis keys to expire.
@@ -230,14 +229,14 @@ func (s *RediStore) Get(ctx echo.Context, name string) (*sessions.Session, error
 // New returns a session for the given name without adding it to the registry.
 //
 // See gorilla/sessions FilesystemStore.New().
-func (s *RediStore) New(r engine.Request, name string) (*sessions.Session, error) {
+func (s *RediStore) New(ctx echo.Context, name string) (*sessions.Session, error) {
 	var err error
 	session := sessions.NewSession(s, name)
 	// make a copy
 	options := *s.Options
 	session.Options = &options
 	session.IsNew = true
-	if v := r.Cookie(name); v != `` {
+	if v := ctx.Request().Cookie(name); len(v) > 0 {
 		err = securecookie.DecodeMulti(name, v, &session.ID, s.Codecs...)
 		if err == nil {
 			ok, err := s.load(session)
@@ -248,13 +247,13 @@ func (s *RediStore) New(r engine.Request, name string) (*sessions.Session, error
 }
 
 // Save adds a single session to the response.
-func (s *RediStore) Save(r engine.Request, w engine.Response, session *sessions.Session) error {
+func (s *RediStore) Save(ctx echo.Context, session *sessions.Session) error {
 	// Marked for deletion.
 	if session.Options.MaxAge < 0 {
 		if err := s.delete(session); err != nil {
 			return err
 		}
-		w.SetCookie(sessions.NewCookie(session.Name(), "", session.Options))
+		sessions.SetCookie(ctx, session.Name(), "", session.Options)
 	} else {
 		// Build an alphanumeric key for the redis store.
 		if session.ID == "" {
@@ -267,7 +266,7 @@ func (s *RediStore) Save(r engine.Request, w engine.Response, session *sessions.
 		if err != nil {
 			return err
 		}
-		w.SetCookie(sessions.NewCookie(session.Name(), encoded, session.Options))
+		sessions.SetCookie(ctx, session.Name(), encoded, session.Options)
 	}
 	return nil
 }

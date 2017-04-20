@@ -1,8 +1,6 @@
 # redistore
 
-[![Build Status](https://drone.io/github.com/boj/redistore/status.png)](https://drone.io/github.com/boj/redistore/latest)
-
-A session store backend for [gorilla/sessions](http://www.gorillatoolkit.org/pkg/sessions) - [src](https://github.com/gorilla/sessions).
+A session store backend for admpub/sessions - [src](https://github.com/admpub/sessions).
 
 ## Requirements
 
@@ -19,6 +17,9 @@ Available on [godoc.org](http://www.godoc.org/gopkg.in/boj/redistore.v1).
 See http://www.gorillatoolkit.org/pkg/sessions for full documentation on underlying interface.
 
 ### Example
+    //import "github.com/webx-top/echo"
+    //var ctx echo.Context
+
 
     // Fetch new store.
     store, err := NewRediStore(10, "tcp", ":6379", "", []byte("secret-key"))
@@ -28,7 +29,7 @@ See http://www.gorillatoolkit.org/pkg/sessions for full documentation on underly
     defer store.Close()
 
     // Get a session.
-	session, err = store.Get(req, "session-key")
+	session, err = store.Get(ctx, "session-key")
 	if err != nil {
         log.Error(err.Error())
     }
@@ -37,13 +38,13 @@ See http://www.gorillatoolkit.org/pkg/sessions for full documentation on underly
     session.Values["foo"] = "bar"
 
     // Save.
-    if err = sessions.Save(req, rsp); err != nil {
+    if err = sessions.Save(ctx); err != nil {
         t.Fatalf("Error saving session: %v", err)
     }
 
     // Delete session.
     session.Options.MaxAge = -1
-    if err = sessions.Save(req, rsp); err != nil {
+    if err = sessions.Save(ctx); err != nil {
         t.Fatalf("Error saving session: %v", err)
     }
 
