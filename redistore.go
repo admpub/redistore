@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/admpub/securecookie"
 	"github.com/admpub/sessions"
 	"github.com/garyburd/redigo/redis"
-	"github.com/gorilla/securecookie"
 	"github.com/webx-top/echo"
 )
 
@@ -85,8 +85,7 @@ func (s GobSerializer) Deserialize(d []byte, ss *sessions.Session) error {
 type RediStore struct {
 	Pool          *redis.Pool
 	Codecs        []securecookie.Codec
-	Options       *sessions.Options // default configuration
-	DefaultMaxAge int               // default Redis TTL for a MaxAge == 0 session
+	DefaultMaxAge int // default Redis TTL for a MaxAge == 0 session
 	maxLength     int
 	keyPrefix     string
 	serializer    SessionSerializer
@@ -127,7 +126,6 @@ func (s *RediStore) SetSerializer(ss SessionSerializer) {
 func (s *RediStore) SetMaxAge(v int) {
 	var c *securecookie.SecureCookie
 	var ok bool
-	s.Options.MaxAge = v
 	for i := range s.Codecs {
 		if c, ok = s.Codecs[i].(*securecookie.SecureCookie); ok {
 			c.MaxAge(v)
@@ -199,12 +197,8 @@ func NewRediStoreWithDB(size int, network, address, password, DB string, keyPair
 func NewRediStoreWithPool(pool *redis.Pool, keyPairs ...[]byte) (*RediStore, error) {
 	rs := &RediStore{
 		// http://godoc.org/github.com/garyburd/redigo/redis#Pool
-		Pool:   pool,
-		Codecs: securecookie.CodecsFromPairs(keyPairs...),
-		Options: &sessions.Options{
-			Path:   "/",
-			MaxAge: sessionExpire,
-		},
+		Pool:          pool,
+		Codecs:        securecookie.CodecsFromPairs(keyPairs...),
 		DefaultMaxAge: 60 * 20, // 20 minutes seems like a reasonable default
 		maxLength:     4096,
 		keyPrefix:     "session_",
@@ -232,12 +226,9 @@ func (s *RediStore) Get(ctx echo.Context, name string) (*sessions.Session, error
 func (s *RediStore) New(ctx echo.Context, name string) (*sessions.Session, error) {
 	var err error
 	session := sessions.NewSession(s, name)
-	// make a copy
-	options := *s.Options
-	session.Options = &options
 	session.IsNew = true
 	if v := ctx.GetCookie(name); len(v) > 0 {
-		err = securecookie.DecodeMulti(name, v, &session.ID, s.Codecs...)
+		err = securecookie.DecodeMultiWithMaxAge(name, v, &session.ID, ctx.CookieOptions().MaxAge, s.Codecs...)
 		if err == nil {
 			ok, err := s.load(session)
 			session.IsNew = !(err == nil && ok) // not new if no error and data available
@@ -249,24 +240,24 @@ func (s *RediStore) New(ctx echo.Context, name string) (*sessions.Session, error
 // Save adds a single session to the response.
 func (s *RediStore) Save(ctx echo.Context, session *sessions.Session) error {
 	// Marked for deletion.
-	if session.Options.MaxAge < 0 {
+	if ctx.CookieOptions().MaxAge < 0 {
 		if err := s.delete(session); err != nil {
 			return err
 		}
-		sessions.SetCookie(ctx, session.Name(), "", session.Options)
+		sessions.SetCookie(ctx, session.Name(), "")
 	} else {
 		// Build an alphanumeric key for the redis store.
 		if session.ID == "" {
 			session.ID = strings.TrimRight(base32.StdEncoding.EncodeToString(securecookie.GenerateRandomKey(32)), "=")
 		}
-		if err := s.save(session); err != nil {
+		if err := s.save(ctx, session); err != nil {
 			return err
 		}
 		encoded, err := securecookie.EncodeMulti(session.Name(), session.ID, s.Codecs...)
 		if err != nil {
 			return err
 		}
-		sessions.SetCookie(ctx, session.Name(), encoded, session.Options)
+		sessions.SetCookie(ctx, session.Name(), encoded)
 	}
 	return nil
 }
@@ -281,10 +272,7 @@ func (s *RediStore) Delete(ctx echo.Context, session *sessions.Session) error {
 	if _, err := conn.Do("DEL", s.keyPrefix+session.ID); err != nil {
 		return err
 	}
-	// Set cookie to expire.
-	options := *session.Options
-	options.MaxAge = -1
-	sessions.SetCookie(ctx, session.Name(), "", &options)
+	ctx.SetCookie(session.Name(), "", -1)
 	// Clear session values.
 	for k := range session.Values {
 		delete(session.Values, k)
@@ -304,7 +292,7 @@ func (s *RediStore) ping() (bool, error) {
 }
 
 // save stores the session in redis.
-func (s *RediStore) save(session *sessions.Session) error {
+func (s *RediStore) save(ctx echo.Context, session *sessions.Session) error {
 	b, err := s.serializer.Serialize(session)
 	if err != nil {
 		return err
@@ -317,7 +305,7 @@ func (s *RediStore) save(session *sessions.Session) error {
 	if err = conn.Err(); err != nil {
 		return err
 	}
-	age := session.Options.MaxAge
+	age := ctx.CookieOptions().MaxAge
 	if age == 0 {
 		age = s.DefaultMaxAge
 	}
