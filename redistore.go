@@ -20,9 +20,6 @@ import (
 	"github.com/webx-top/echo"
 )
 
-// Amount of time for cookies/redis keys to expire.
-var sessionExpire = 86400 * 30
-
 // SessionSerializer provides an interface hook for alternative serializers
 type SessionSerializer interface {
 	Deserialize(d []byte, ss *sessions.Session) error
@@ -119,7 +116,6 @@ func (s *RediStore) SetSerializer(ss SessionSerializer) {
 // `Options.MaxAge` to -1, as specified in
 //    http://godoc.org/github.com/gorilla/sessions#Options
 //
-// Default is the one provided by this package value - `sessionExpire`.
 // Set it to 0 for no restriction.
 // Because we use `MaxAge` also in SecureCookie crypting algorithm you should
 // use this function to change `MaxAge` value.
@@ -286,6 +282,15 @@ func (s *RediStore) Delete(ctx echo.Context, session *sessions.Session) error {
 	return nil
 }
 
+func (s *RediStore) Remove(sessionID string) error {
+	conn := s.Pool.Get()
+	defer conn.Close()
+	if _, err := conn.Do("DEL", s.keyPrefix+sessionID); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ping does an internal ping against a server to check if it is alive.
 func (s *RediStore) ping() (bool, error) {
 	conn := s.Pool.Get()
@@ -343,10 +348,5 @@ func (s *RediStore) load(session *sessions.Session) (bool, error) {
 
 // delete removes keys from redis if MaxAge<0
 func (s *RediStore) delete(session *sessions.Session) error {
-	conn := s.Pool.Get()
-	defer conn.Close()
-	if _, err := conn.Do("DEL", s.keyPrefix+session.ID); err != nil {
-		return err
-	}
-	return nil
+	return s.Remove(session.ID)
 }
